@@ -16,46 +16,46 @@ CIPHERTEXTS = [
 ]
 
 def hex_to_bytes(hex_str):
-    """十六进制字符串转字节数组"""
     return binascii.unhexlify(hex_str)
 
 def bytes_xor(b1, b2):
-    """字节数组逐字节异或"""
     return bytes([a ^ b for a, b in zip(b1, b2)])
 
 def find_space_positions(c1, c2):
-    """利用空格特征推断空格位置"""
     xor_res = bytes_xor(c1, c2)
     space_pos = []
     for idx, val in enumerate(xor_res):
-        # 空格与字母异或结果为0x20，或异或结果为字母
         if val == 0x20 or (0x41 <= val <= 0x5A) or (0x61 <= val <= 0x7A):
             space_pos.append(idx)
     return space_pos
 
 def recover_keystream(cipher_list, space_pos):
-    """还原密钥流"""
     keystream = {}
     max_len = max(len(c) for c in cipher_list)
-    
-    # 交叉验证还原密钥
+
     for cipher in cipher_list[:-1]:
         for pos in space_pos:
             if pos >= len(cipher):
                 continue
-            key_byte = cipher[pos] ^ 0x20  # 假设该位置是空格
+            key_byte = cipher[pos] ^ 0x20
             if pos in keystream and keystream[pos] != key_byte:
                 continue
             keystream[pos] = key_byte
-    
-    # 补全密钥流
+
     full_ks = bytearray(max_len)
     for pos in range(max_len):
-        full_ks[pos] = keystream.get(pos, cipher_list[0][pos] ^ 0x20)
+        if pos in keystream:
+            full_ks[pos] = keystream[pos]
+        else:
+            for c in cipher_list:
+                if pos < len(c):
+                    full_ks[pos] = c[pos] ^ 0x20
+                    break
+            else:
+                full_ks[pos] = 0
     return full_ks
 
 def decrypt(cipher_hex, keystream):
-    """解密密文"""
     cipher = hex_to_bytes(cipher_hex)
     plain = []
     for i, c in enumerate(cipher):
@@ -67,14 +67,10 @@ def decrypt(cipher_hex, keystream):
     return "".join(plain)
 
 if __name__ == "__main__":
-    # 转换密文格式
     cipher_bytes = [hex_to_bytes(ct) for ct in CIPHERTEXTS]
-    # 找空格位置
     space_pos = find_space_positions(cipher_bytes[0], cipher_bytes[1])
-    # 还原密钥流
     keystream = recover_keystream(cipher_bytes, space_pos)
-    # 解密目标密文
     target_plain = decrypt(CIPHERTEXTS[-1], keystream)
     
     print("=== 解密结果 ===")
-    print(f"目标密文明文：\n{target_plain}")
+    print(target_plain)

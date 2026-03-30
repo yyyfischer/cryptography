@@ -33,9 +33,8 @@
 多段密文解密后均为可读文本，验证了密钥流还原的正确性。
 
 2. 最终明文结果
-运行代码后，目标密文解密结果为：
-plaintext
-When using a stream cipher, never use the same key more than once. Otherwise, an attacker can easily recover the plaintext by XORing the ciphertexts together.
+
+The secret message is : When using a stream cipher, never use the key more than once.
 
 
 五、实验结论

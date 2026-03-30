@@ -27,7 +27,7 @@ Lab1：穷举法破译凯撒密码
 五、实验结果
 密文：`NUFECMWBYUJMBIQGYNBYMWIXY`
 正确密钥：`k = 20`
-解密明文：`TAKLISCHEAPHESOSWSMWHSHAOED`
+解密明文：`TALK IS CHEAP SHOW ME THE CODE`
 验证：将解密明文用 `k=20` 加密，可还原为原密文，验证通过。
 
 六、实验总结

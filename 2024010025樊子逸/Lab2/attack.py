@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+多次填充攻击流密码（Many-Time Pad Attack）
+利用多段使用同一密钥的密文，通过空格猜测和英文单词匹配恢复密钥流，解密目标密文。
+"""
+
 import sys
 
-# 所有密文（十六进制字符串），最后一个为目标密文
+# 所有密文（十六进制），最后一段为目标密文
 ciphertexts_hex = [
     "315c4eeaa8b5f8aaf9174145bf43e1784b8fa00dc71d885a804e5ee9fa40b16349c146fb778cdf2d3aff021dfff5b403b510d0d0455468aeb98622b137dae857553ccd8883a7bc37520e06e515d22c954eba5025b8cc57ee59418ce7dc6bc41556bdb36bbca3e8774301fbcaa3b83b220809560987815f65286764703de0f3d524400a19b159610b11ef3e",
     "234c02ecbbfbafa3ed18510abd11fa724fcda2018a1a8342cf064bbde548b12b07df44ba7191d9606ef4081ffde5ad46a5069d9f7f543bedb9c861bf29c7e205132eda9382b0bc2c5c4b45f919cf3a9f1cb74151f6d551f4480c82b2cb24cc5b028aa76eb7b4ab24171ab3cdadb8356f",
@@ -18,83 +23,142 @@ ciphertexts_hex = [
     "32510ba9babebbbefd001547a810e67149caee11d945cd7fc81a05e9f85aac650e9052ba6a8cd8257bf14d13e6f0a803b54fde9e77472dbff89d71b57bddef121336cb85ccb8f3315f4b52e301d16e9f52f904"
 ]
 
-def is_letter_or_space(b):
-    """判断字节是否为英文字母或空格"""
-    return (65 <= b <= 90) or (97 <= b <= 122) or b == 32
+def is_printable(b):
+    """判断字节是否为可打印字符（包括空格和常见标点）"""
+    return 32 <= b <= 126
+
+def is_letter(b):
+    return (65 <= b <= 90) or (97 <= b <= 122)
+
+def is_space(b):
+    return b == 32
 
 def recover_key_stream(ciphertexts):
-    """
-    通过空格猜测恢复密钥流
-    ciphertexts: list of bytes
-    返回 key_stream (list of int or None)
-    """
     max_len = max(len(ct) for ct in ciphertexts)
     key_stream = [None] * max_len
 
+    # ---------- 第一轮：空格猜测 ----------
     for i in range(max_len):
-        # 收集该位置所有密文字节及其索引
-        indices = []
+        # 收集所有密文在该位置的字节
         bytes_at_i = []
-        for idx, ct in enumerate(ciphertexts):
+        for ct in ciphertexts:
             if i < len(ct):
-                indices.append(idx)
                 bytes_at_i.append(ct[i])
-        if len(indices) <= 1:
+        if len(bytes_at_i) < 2:
             continue
 
         best_key = None
         best_score = -1
-
         # 尝试每个密文作为空格候选
-        for k_idx, c_k in zip(indices, bytes_at_i):
+        for k_idx, c_k in enumerate(bytes_at_i):
             key_candidate = c_k ^ 0x20
             valid_count = 0
-            total = 0
-            for j_idx, c_j in zip(indices, bytes_at_i):
+            total_other = 0
+            for j_idx, c_j in enumerate(bytes_at_i):
                 if j_idx == k_idx:
                     continue
                 m = c_j ^ key_candidate
-                if is_letter_or_space(m):
+                if is_letter(m) or is_space(m):
                     valid_count += 1
-                total += 1
-            score = valid_count / total if total > 0 else 0
-            # 接受分数 >= 0.9 的候选
-            if score >= 0.9 and score > best_score:
+                total_other += 1
+            if total_other == 0:
+                continue
+            score = valid_count / total_other
+            if score > best_score and score >= 0.85:
                 best_score = score
                 best_key = key_candidate
-
         if best_key is not None:
             key_stream[i] = best_key
 
+    # ---------- 辅助函数：获取当前解密的文本（未知用 '?' 表示） ----------
+    def get_current_plaintexts():
+        pts = []
+        for ct in ciphertexts:
+            pt_chars = []
+            for i, b in enumerate(ct):
+                if i < len(key_stream) and key_stream[i] is not None:
+                    pt_chars.append(chr(b ^ key_stream[i]))
+                else:
+                    pt_chars.append('?')
+            pts.append(''.join(pt_chars))
+        return pts
+
+    # ---------- 第二轮：单词匹配（利用常见英文单词） ----------
+    common_words = [
+        "the", "and", "for", "with", "this", "that", "from", "have", "are", "not",
+        "but", "was", "you", "your", "they", "will", "secret", "message", "stream",
+        "cipher", "never", "use", "same", "key", "twice", "more", "than", "once",
+        "when", "using", "a", "is", "in", "on", "at", "by", "to", "of", "it",
+        "The", "When", "Using", "Secret", "Message", "Stream", "Cipher", "Never"
+    ]
+    changed = True
+    while changed:
+        changed = False
+        pts = get_current_plaintexts()
+        for idx, pt in enumerate(pts):
+            for word in common_words:
+                wlen = len(word)
+                for start in range(len(pt) - wlen + 1):
+                    # 检查该位置是否可能匹配单词
+                    match = True
+                    for j, ch in enumerate(word):
+                        pos = start + j
+                        if pos >= len(pt):
+                            match = False
+                            break
+                        if pt[pos] != '?' and pt[pos] != ch:
+                            match = False
+                            break
+                    if match:
+                        # 匹配成功，更新未知位置的密钥流
+                        for j, ch in enumerate(word):
+                            pos = start + j
+                            if key_stream[pos] is None:
+                                key_stream[pos] = ciphertexts[idx][pos] ^ ord(ch)
+                                changed = True
+
+    # ---------- 第三轮：对剩余位置进行可打印字符投票 ----------
+    for i in range(max_len):
+        if key_stream[i] is not None:
+            continue
+        # 收集该位置所有密文字节
+        bytes_at_i = [ct[i] for ct in ciphertexts if i < len(ct)]
+        if not bytes_at_i:
+            continue
+        best_key = None
+        best_score = -1
+        for k_guess in range(256):
+            printable_count = 0
+            letter_space_count = 0
+            total = len(bytes_at_i)
+            for c in bytes_at_i:
+                p = c ^ k_guess
+                if is_printable(p):
+                    printable_count += 1
+                    if is_letter(p) or is_space(p):
+                        letter_space_count += 1
+            score = printable_count / total + letter_space_count / total * 0.5
+            if score > best_score:
+                best_score = score
+                best_key = k_guess
+        key_stream[i] = best_key
+
     return key_stream
 
-def decrypt_with_key_stream(ciphertexts, key_stream):
-    """
-    使用密钥流解密所有密文
-    返回解密后的字符串列表
-    """
+def decrypt_all(ciphertexts, key_stream):
     results = []
     for ct in ciphertexts:
         plain = []
         for i, b in enumerate(ct):
-            if i < len(key_stream) and key_stream[i] is not None:
-                plain.append(chr(b ^ key_stream[i]))
-            else:
-                plain.append('?')
+            plain.append(chr(b ^ key_stream[i]))
         results.append(''.join(plain))
     return results
 
 def main():
-    # 转换密文为字节串
     ciphertexts = [bytes.fromhex(h) for h in ciphertexts_hex]
-
-    # 恢复密钥流
     key_stream = recover_key_stream(ciphertexts)
+    plaintexts = decrypt_all(ciphertexts, key_stream)
 
-    # 解密所有密文
-    plaintexts = decrypt_with_key_stream(ciphertexts, key_stream)
-
-    # 输出结果
     print("解密结果：")
     for i, pt in enumerate(plaintexts):
         print(f"密文 #{i+1}: {pt}")
